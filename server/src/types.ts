@@ -32,7 +32,7 @@ export interface Lobby {
   hostSocketId: string | null;
   players: Player[];
   phase: Phase;
-  cells: Cell[][]; // 5 categories x 5 point rows
+  cells: Cell[]; // flat list of 25 cells (5 categories x 5 point values)
   currentPickerId: string | null;
   currentQuestion: ActiveQuestion | null;
   revealTimer: ReturnType<typeof setInterval> | null;
