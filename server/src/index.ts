@@ -51,6 +51,12 @@ function normalize(s: string): string {
     .replace(/\s+/g, " ");
 }
 
+function isCorrectGuess(guess: string, answer: string | string[]): boolean {
+  const normalizedGuess = normalize(guess || "");
+  const accepted = Array.isArray(answer) ? answer : [answer];
+  return accepted.some((a) => normalize(a) === normalizedGuess);
+}
+
 function findQuestionText(category: string, points: number) {
   const cat = CATEGORIES.find((c) => c.name === category);
   if (!cat) return null;
@@ -343,7 +349,7 @@ io.on("connection", (socket: Socket) => {
     const cq = lobby.currentQuestion;
     if (!cq || lobby.phase !== "BUZZED" || !cq.buzzedPlayerId) return cb?.({ ok: false, error: "No active buzz" });
     const buzzedId = cq.buzzedPlayerId;
-    const correct = normalize(guess || "") === normalize(cq.answer);
+    const correct = isCorrectGuess(guess, cq.answer);
     if (correct) {
       const player = lobby.players.find((p) => p.id === buzzedId);
       if (player) player.score += cq.points;
