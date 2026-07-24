@@ -6,8 +6,8 @@ import { CATEGORIES, POINT_VALUES } from "./questions";
 import { Lobby, Player, HostView, PlayerView, Cell } from "./types";
 
 const PORT = process.env.PORT || 4000;
-const REVEAL_MS_PER_CHAR = 100; // typing speed
-const COUNTDOWN_SECONDS = 3;
+const REVEAL_MS_PER_CHAR = 45; // typing speed
+const COUNTDOWN_SECONDS = 3; // how many numbers flash before reveal starts
 
 const app = express();
 app.use(cors());
@@ -41,6 +41,14 @@ function buildCells(): Cell[] {
     }
   }
   return cells;
+}
+
+function normalize(s: string): string {
+  return s
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/\s+/g, " ");
 }
 
 function findQuestionText(category: string, points: number) {
@@ -185,6 +193,7 @@ function removePlayer(lobby: Lobby, playerId: string) {
 
   if (lobby.players.length === 0) {
     clearRevealTimer(lobby);
+    clearCountdownTimer(lobby);
     lobby.currentPickerId = null;
     lobby.currentQuestion = null;
     if (lobby.phase !== "LOBBY") lobby.phase = "BOARD";
@@ -197,6 +206,7 @@ function removePlayer(lobby: Lobby, playerId: string) {
       cq.buzzedPlayerId = null;
       if (cq.attemptedPlayerIds.length >= lobby.players.length) {
         cq.revealedChars = cq.text.length;
+        cq.resultType = "failed";
         lobby.phase = "REVEAL_ANSWER";
       } else {
         startReveal(lobby);
@@ -327,22 +337,26 @@ io.on("connection", (socket: Socket) => {
     broadcast(lobby);
   });
 
-  socket.on("submit_answer", ({ code, token, correct }, cb) => {
+  socket.on("submit_guess", ({ code, token, guess }, cb) => {
     const lobby = lobbies.get(code);
     if (!checkAuth(lobby, token)) return cb?.({ ok: false, error: "Not authorized" });
     const cq = lobby.currentQuestion;
     if (!cq || lobby.phase !== "BUZZED" || !cq.buzzedPlayerId) return cb?.({ ok: false, error: "No active buzz" });
     const buzzedId = cq.buzzedPlayerId;
+    const correct = normalize(guess || "") === normalize(cq.answer);
     if (correct) {
       const player = lobby.players.find((p) => p.id === buzzedId);
       if (player) player.score += cq.points;
-      lobby.phase = "BOARD";
-      lobby.currentQuestion = null;
-      rotatePicker(lobby, buzzedId);
+      cq.buzzedPlayerId = null;
+      cq.resultType = "correct";
+      cq.winnerId = buzzedId;
+      cq.revealedChars = cq.text.length;
+      lobby.phase = "REVEAL_ANSWER";
     } else {
       cq.attemptedPlayerIds.push(buzzedId);
       cq.buzzedPlayerId = null;
       if (cq.attemptedPlayerIds.length >= lobby.players.length) {
+        cq.resultType = "failed";
         cq.revealedChars = cq.text.length;
         lobby.phase = "REVEAL_ANSWER";
       } else {
@@ -360,6 +374,7 @@ io.on("connection", (socket: Socket) => {
     if (!cq) return cb?.({ ok: false });
     clearRevealTimer(lobby);
     cq.revealedChars = cq.text.length;
+    cq.resultType = "failed";
     lobby.phase = "REVEAL_ANSWER";
     cb?.({ ok: true });
     broadcast(lobby);
@@ -368,9 +383,14 @@ io.on("connection", (socket: Socket) => {
   socket.on("continue_to_board", ({ code, token }, cb) => {
     const lobby = lobbies.get(code);
     if (!checkAuth(lobby, token)) return cb?.({ ok: false, error: "Not authorized" });
+    const cq = lobby.currentQuestion;
     lobby.phase = "BOARD";
     lobby.currentQuestion = null;
-    rotatePicker(lobby);
+    if (cq?.resultType === "correct" && cq.winnerId) {
+      rotatePicker(lobby, cq.winnerId);
+    } else {
+      rotatePicker(lobby);
+    }
     cb?.({ ok: true });
     broadcast(lobby);
   });
@@ -388,6 +408,7 @@ io.on("connection", (socket: Socket) => {
     const lobby = lobbies.get(code);
     if (!checkAuth(lobby, token)) return cb?.({ ok: false, error: "Not authorized" });
     clearRevealTimer(lobby);
+    clearCountdownTimer(lobby);
     io.to(code).emit("game_ended");
     lobbies.delete(code);
     cb?.({ ok: true });

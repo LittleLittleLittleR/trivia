@@ -46,18 +46,10 @@ export default function HostPage() {
     });
   }
 
-  function submitAnswer(correct: boolean) {
+  function submitGuess() {
     if (answerNote.trim().length === 0) return;
     const socket = getSocket();
-    socket.emit("submit_answer", { code, token, correct }, () => setAnswerNote(""));
-  }
-
-  function normalize(s: string) {
-    return s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9 ]/g, "")
-      .replace(/\s+/g, " ");
+    socket.emit("submit_guess", { code, token, guess: answerNote }, () => setAnswerNote(""));
   }
 
   function forceReveal() {
@@ -193,32 +185,20 @@ export default function HostPage() {
             {view.phase === "BUZZED" && buzzedPlayer && (
               <>
                 <div className="buzzed-banner">🔔 {buzzedPlayer.name} buzzed in!</div>
-                <div className="answer-key">
-                  Answer key: <b>{view.currentQuestion.answer}</b>
-                </div>
                 <div className="field" style={{ marginTop: 12, textAlign: "left" }}>
-                  <label>What did they say? (required — type it to compare against the answer key)</label>
+                  <label>What did they say?</label>
                   <input
                     type="text"
                     value={answerNote}
                     onChange={(e) => setAnswerNote(e.target.value)}
                     placeholder="Type their guess here..."
                     autoFocus
+                    onKeyDown={(e) => e.key === "Enter" && submitGuess()}
                   />
-                  {answerNote.trim().length > 0 && (
-                    <div className={`match-hint ${normalize(answerNote) === normalize(view.currentQuestion.answer) ? "match" : "no-match"}`}>
-                      {normalize(answerNote) === normalize(view.currentQuestion.answer)
-                        ? "✓ Matches the answer key"
-                        : "Doesn't exactly match — use your judgement"}
-                    </div>
-                  )}
                 </div>
                 <div className="answer-row">
-                  <button className="btn-success" onClick={() => submitAnswer(true)} disabled={answerNote.trim().length === 0}>
-                    ✅ Correct
-                  </button>
-                  <button className="btn-danger" onClick={() => submitAnswer(false)} disabled={answerNote.trim().length === 0}>
-                    ❌ Incorrect
+                  <button className="btn-primary" onClick={submitGuess} disabled={answerNote.trim().length === 0}>
+                    Submit Guess
                   </button>
                 </div>
               </>
@@ -226,6 +206,15 @@ export default function HostPage() {
 
             {view.phase === "REVEAL_ANSWER" && (
               <>
+                {view.currentQuestion.resultType === "correct" ? (
+                  <div className="buzzed-banner">
+                    ✅ {view.players.find((p) => p.id === view.currentQuestion?.winnerId)?.name || "Player"} got it right!
+                  </div>
+                ) : (
+                  <div className="buzzed-banner" style={{ background: "rgba(230,57,70,0.15)", borderColor: "rgba(230,57,70,0.5)" }}>
+                    ❌ Nobody got it
+                  </div>
+                )}
                 <div className="answer-reveal">Answer: {view.currentQuestion.answer}</div>
                 <div className="answer-row">
                   <button className="btn-primary" onClick={continueToBoard}>
