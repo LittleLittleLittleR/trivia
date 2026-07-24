@@ -17,13 +17,18 @@ export default function HostPage() {
     function onState(v: HostView) {
       setView(v);
     }
+    function onEnded() {
+      router.push("/");
+    }
     socket.on("state", onState);
+    socket.on("game_ended", onEnded);
     socket.emit("host_join", { code, token }, (res: any) => {
       if (!res?.ok) setError(res?.error || "Could not connect as host");
     });
 
     return () => {
       socket.off("state", onState);
+      socket.off("game_ended", onEnded);
     };
   }, [router.isReady, code, token]);
 
@@ -41,9 +46,10 @@ export default function HostPage() {
     });
   }
 
-  function submitAnswer(correct: boolean) {
+  function submitGuess() {
+    if (answerNote.trim().length === 0) return;
     const socket = getSocket();
-    socket.emit("submit_answer", { code, token, correct }, () => setAnswerNote(""));
+    socket.emit("submit_guess", { code, token, guess: answerNote }, () => setAnswerNote(""));
   }
 
   function forceReveal() {
@@ -54,6 +60,14 @@ export default function HostPage() {
   function continueToBoard() {
     const socket = getSocket();
     socket.emit("continue_to_board", { code, token });
+  }
+
+  function endGame() {
+    if (!confirm("End the game for everyone? This can't be undone.")) return;
+    const socket = getSocket();
+    socket.emit("end_game", { code, token }, (res: any) => {
+      if (res?.ok) router.push("/");
+    });
   }
 
   if (!view) {
@@ -68,27 +82,34 @@ export default function HostPage() {
   const buzzedPlayer = view.players.find((p) => p.id === view.currentQuestion?.buzzedPlayerId);
 
   return (
-    <div className="page">
-      <div className="brand" style={{ fontSize: "1.5rem" }}>🏆 TRIVIA SHOWDOWN — HOST</div>
-      <div className="board-code">
-        Players join at <b>{typeof window !== "undefined" ? window.location.origin : ""}</b> with code{" "}
-        <b>{view.code}</b>
-      </div>
+    <div className={`host-page ${view.phase === "BOARD" ? "board-mode" : ""}`}>
+      <div className="host-header">
+        <div className="host-top-row">
+          <div className="brand" style={{ fontSize: "1.3rem", marginBottom: 2 }}>🏆 TRIVIA SHOWDOWN — HOST</div>
+          <button className="btn-danger btn-small" onClick={endGame}>
+            End Game
+          </button>
+        </div>
+        <div className="board-code">
+          Players join at <b>{typeof window !== "undefined" ? window.location.origin : ""}</b> with code{" "}
+          <b>{view.code}</b>
+        </div>
 
-      <div className="scoreboard">
-        {view.players.map((p) => (
-          <div
-            key={p.id}
-            className={`score-chip ${p.id === view.currentPickerId ? "picker" : ""} ${!p.connected ? "disconnected" : ""}`}
-          >
-            <span className="dot" />
-            {p.name}
-            <span className="pts">{p.score}</span>
-          </div>
-        ))}
-      </div>
+        <div className="scoreboard">
+          {view.players.map((p) => (
+            <div
+              key={p.id}
+              className={`score-chip ${p.id === view.currentPickerId ? "picker" : ""} ${!p.connected ? "disconnected" : ""}`}
+            >
+              <span className="dot" />
+              {p.name}
+              <span className="pts">{p.score}</span>
+            </div>
+          ))}
+        </div>
 
-      {error && <div className="error-msg">{error}</div>}
+        {error && <div className="error-msg">{error}</div>}
+      </div>
 
       {view.phase === "LOBBY" && (
         <div className="card">
@@ -102,7 +123,7 @@ export default function HostPage() {
       )}
 
       {view.phase === "BOARD" && (
-        <>
+        <div className="board-wrap">
           {picker && <div className="turn-banner">🎯 {picker.name}, pick a category and point value!</div>}
           <div className="board-grid">
             {view.categories.map((cat) => (
@@ -125,7 +146,21 @@ export default function HostPage() {
               })
             )}
           </div>
-        </>
+        </div>
+      )}
+
+      {view.phase === "COUNTDOWN" && view.currentQuestion && (
+        <div className="question-card">
+          <div className="question-topic">
+            {view.currentQuestion.category} — {view.currentQuestion.points} pts
+          </div>
+          <div className="countdown-label">Get ready...</div>
+          <div className="countdown-display">
+            <div key={view.countdownValue} className="countdown-number">
+              {view.countdownValue}
+            </div>
+          </div>
+        </div>
       )}
 
       {(view.phase === "REVEALING" || view.phase === "BUZZED" || view.phase === "REVEAL_ANSWER") &&
@@ -150,21 +185,20 @@ export default function HostPage() {
             {view.phase === "BUZZED" && buzzedPlayer && (
               <>
                 <div className="buzzed-banner">🔔 {buzzedPlayer.name} buzzed in!</div>
-                <div className="field" style={{ marginTop: 16, textAlign: "left" }}>
-                  <label>What did they say? (optional note)</label>
+                <div className="field" style={{ marginTop: 12, textAlign: "left" }}>
+                  <label>What did they say?</label>
                   <input
                     type="text"
                     value={answerNote}
                     onChange={(e) => setAnswerNote(e.target.value)}
                     placeholder="Type their guess here..."
+                    autoFocus
+                    onKeyDown={(e) => e.key === "Enter" && submitGuess()}
                   />
                 </div>
                 <div className="answer-row">
-                  <button className="btn-success" onClick={() => submitAnswer(true)}>
-                    ✅ Correct
-                  </button>
-                  <button className="btn-danger" onClick={() => submitAnswer(false)}>
-                    ❌ Incorrect
+                  <button className="btn-primary" onClick={submitGuess} disabled={answerNote.trim().length === 0}>
+                    Submit Guess
                   </button>
                 </div>
               </>
@@ -172,6 +206,15 @@ export default function HostPage() {
 
             {view.phase === "REVEAL_ANSWER" && (
               <>
+                {view.currentQuestion.resultType === "correct" ? (
+                  <div className="buzzed-banner">
+                    ✅ {view.players.find((p) => p.id === view.currentQuestion?.winnerId)?.name || "Player"} got it right!
+                  </div>
+                ) : (
+                  <div className="buzzed-banner" style={{ background: "rgba(230,57,70,0.15)", borderColor: "rgba(230,57,70,0.5)" }}>
+                    ❌ Nobody got it
+                  </div>
+                )}
                 <div className="answer-reveal">Answer: {view.currentQuestion.answer}</div>
                 <div className="answer-row">
                   <button className="btn-primary" onClick={continueToBoard}>

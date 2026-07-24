@@ -19,7 +19,12 @@ export default function PlayerPage() {
     function onState(v: PlayerView) {
       setView(v);
     }
+    function onEnded() {
+      if (code) sessionStorage.removeItem(`trivia_player_${code}`);
+      router.push("/");
+    }
     socket.on("state", onState);
+    socket.on("game_ended", onEnded);
 
     const stored = sessionStorage.getItem(`trivia_player_${code}`);
     if (stored) {
@@ -34,6 +39,7 @@ export default function PlayerPage() {
 
     return () => {
       socket.off("state", onState);
+      socket.off("game_ended", onEnded);
     };
   }, [router.isReady, code]);
 
@@ -56,6 +62,16 @@ export default function PlayerPage() {
     if (!playerId || !code) return;
     const socket = getSocket();
     socket.emit("buzz", { code, playerId });
+  }
+
+  function leaveGame() {
+    if (!confirm("Leave the game?")) return;
+    if (!playerId || !code) return;
+    const socket = getSocket();
+    socket.emit("leave_game", { code, playerId }, () => {
+      sessionStorage.removeItem(`trivia_player_${code}`);
+      router.push("/");
+    });
   }
 
   if (needsName) {
@@ -112,7 +128,12 @@ export default function PlayerPage() {
 
   return (
     <div className="page">
-      <div className="brand" style={{ fontSize: "1.4rem" }}>🏆 {view.you?.name || "Player"}</div>
+      <div className="player-top-row">
+        <div className="brand" style={{ fontSize: "1.4rem" }}>🏆 {view.you?.name || "Player"}</div>
+        <button className="btn-secondary btn-small" onClick={leaveGame}>
+          Leave
+        </button>
+      </div>
 
       <div className="scoreboard">
         {view.players.map((p) => (

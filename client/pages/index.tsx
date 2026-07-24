@@ -26,10 +26,29 @@ export default function Home() {
   function handleJoin() {
     const code = joinCode.trim().toUpperCase();
     const name = joinName.trim();
+    
     if (!code || !name) {
       setError("Enter both a lobby code and your name");
       return;
     }
+
+    // check if the name is already taken in the lobby
+    const socket = getSocket();
+    socket.emit("get_lobby_info", { code }, (res: any) => {
+      if (!res?.ok) {
+        setError(res?.error || "Could not get lobby info");
+        return;
+      }
+      const names = res.players.map((p: any) => p.name.toLowerCase());
+      if (names.includes(name.toLowerCase())) {
+        setError("Name already taken in this lobby");
+        return;
+      }
+      joinLobby(code, name);
+    });
+  }
+
+  function joinLobby(code: string, name: string) {
     setLoading(true);
     setError("");
     const socket = getSocket();
