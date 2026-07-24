@@ -18,7 +18,7 @@ export interface ActiveQuestion {
   category: string;
   points: number;
   text: string;
-  answer: string;
+  answer: string | string[];
   revealedChars: number;
   attemptedPlayerIds: string[]; // players who buzzed + were wrong on this question
   buzzedPlayerId: string | null; // player currently locked in to answer
@@ -63,7 +63,7 @@ export interface HostView {
     category: string;
     points: number;
     text: string;
-    answer: string | null; // only populated once resultType is set - hidden while a guess is being judged
+    answer: string | string[] | null; // only populated once resultType is set - hidden while a guess is being judged
     revealedText: string;
     fullyRevealed: boolean;
     buzzedPlayerId: string | null;
