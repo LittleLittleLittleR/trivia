@@ -1,4 +1,4 @@
-export type Phase = "LOBBY" | "BOARD" | "REVEALING" | "BUZZED" | "REVEAL_ANSWER";
+export type Phase = "LOBBY" | "BOARD" | "COUNTDOWN" | "REVEALING" | "BUZZED" | "REVEAL_ANSWER";
 
 export interface PublicPlayer {
   id: string;
@@ -21,15 +21,18 @@ export interface HostView {
   categories: string[];
   cells: Cell[];
   currentPickerId: string | null;
+  countdownValue: number | null;
   currentQuestion: {
     category: string;
     points: number;
     text: string;
-    answer: string;
+    answer: string | null;
     revealedText: string;
     fullyRevealed: boolean;
     buzzedPlayerId: string | null;
     attemptedPlayerIds: string[];
+    resultType: "correct" | "failed" | null;
+    winnerId: string | null;
   } | null;
 }
 
@@ -43,5 +46,6 @@ export interface PlayerView {
   currentPickerId: string | null;
   currentPoints: number | null;
   currentCategory: string | null;
+  countdownValue: number | null;
   buzzerState: "disabled" | "ready" | "locked_you" | "locked_other";
 }

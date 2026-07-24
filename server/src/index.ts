@@ -6,7 +6,8 @@ import { CATEGORIES, POINT_VALUES } from "./questions";
 import { Lobby, Player, HostView, PlayerView, Cell } from "./types";
 
 const PORT = process.env.PORT || 4000;
-const REVEAL_MS_PER_CHAR = 45; // typing speed
+const REVEAL_MS_PER_CHAR = 100; // typing speed
+const COUNTDOWN_SECONDS = 3;
 
 const app = express();
 app.use(cors());
@@ -60,6 +61,13 @@ function clearRevealTimer(lobby: Lobby) {
   }
 }
 
+function clearCountdownTimer(lobby: Lobby) {
+  if (lobby.countdownTimer) {
+    clearInterval(lobby.countdownTimer);
+    lobby.countdownTimer = null;
+  }
+}
+
 function hostView(lobby: Lobby): HostView {
   const cq = lobby.currentQuestion;
   return {
@@ -70,16 +78,19 @@ function hostView(lobby: Lobby): HostView {
     categories: CATEGORIES.map((c) => c.name),
     cells: lobby.cells,
     currentPickerId: lobby.currentPickerId,
+    countdownValue: lobby.countdownValue,
     currentQuestion: cq
       ? {
           category: cq.category,
           points: cq.points,
           text: cq.text,
-          answer: cq.answer,
+          answer: cq.resultType ? cq.answer : null,
           revealedText: cq.text.slice(0, cq.revealedChars),
           fullyRevealed: cq.revealedChars >= cq.text.length,
           buzzedPlayerId: cq.buzzedPlayerId,
           attemptedPlayerIds: cq.attemptedPlayerIds,
+          resultType: cq.resultType,
+          winnerId: cq.winnerId,
         }
       : null,
   };
@@ -104,6 +115,7 @@ function playerView(lobby: Lobby, playerId: string): PlayerView {
     currentPickerId: lobby.currentPickerId,
     currentPoints: cq ? cq.points : null,
     currentCategory: cq ? cq.category : null,
+    countdownValue: lobby.countdownValue,
     buzzerState,
   };
 }
@@ -115,6 +127,25 @@ function broadcast(lobby: Lobby) {
   for (const p of lobby.players) {
     if (p.connected) io.to(p.socketId).emit("state", playerView(lobby, p.id));
   }
+}
+
+function startCountdown(lobby: Lobby) {
+  clearRevealTimer(lobby);
+  clearCountdownTimer(lobby);
+  lobby.phase = "COUNTDOWN";
+  lobby.countdownValue = COUNTDOWN_SECONDS;
+  broadcast(lobby);
+  lobby.countdownTimer = setInterval(() => {
+    if (lobby.countdownValue === null) return;
+    lobby.countdownValue -= 1;
+    if (lobby.countdownValue <= 0) {
+      clearCountdownTimer(lobby);
+      lobby.countdownValue = null;
+      startReveal(lobby);
+    } else {
+      broadcast(lobby);
+    }
+  }, 1000);
 }
 
 function startReveal(lobby: Lobby) {
@@ -143,6 +174,42 @@ function rotatePicker(lobby: Lobby, toId?: string) {
   lobby.currentPickerId = next.id;
 }
 
+function removePlayer(lobby: Lobby, playerId: string) {
+  const idx = lobby.players.findIndex((p) => p.id === playerId);
+  if (idx === -1) return;
+  const wasPicker = lobby.currentPickerId === playerId;
+  const cq = lobby.currentQuestion;
+  const wasBuzzed = cq?.buzzedPlayerId === playerId;
+
+  lobby.players.splice(idx, 1);
+
+  if (lobby.players.length === 0) {
+    clearRevealTimer(lobby);
+    lobby.currentPickerId = null;
+    lobby.currentQuestion = null;
+    if (lobby.phase !== "LOBBY") lobby.phase = "BOARD";
+    return;
+  }
+
+  if (cq) {
+    cq.attemptedPlayerIds = cq.attemptedPlayerIds.filter((id) => id !== playerId);
+    if (wasBuzzed) {
+      cq.buzzedPlayerId = null;
+      if (cq.attemptedPlayerIds.length >= lobby.players.length) {
+        cq.revealedChars = cq.text.length;
+        lobby.phase = "REVEAL_ANSWER";
+      } else {
+        startReveal(lobby);
+      }
+    }
+  }
+
+  if (wasPicker) {
+    const nextIdx = idx % lobby.players.length;
+    lobby.currentPickerId = lobby.players[nextIdx].id;
+  }
+}
+
 function checkAuth(lobby: Lobby | undefined, token: string): lobby is Lobby {
   return !!lobby && lobby.hostToken === token;
 }
@@ -161,6 +228,8 @@ io.on("connection", (socket: Socket) => {
       currentPickerId: null,
       currentQuestion: null,
       revealTimer: null,
+      countdownValue: null,
+      countdownTimer: null,
       createdAt: Date.now(),
     };
     lobbies.set(code, lobby);
@@ -178,12 +247,22 @@ io.on("connection", (socket: Socket) => {
     broadcast(lobby);
   });
 
+  socket.on("get_lobby_info", ({ code }, cb) => {
+    const lobby = lobbies.get(code);
+    if (!lobby) return cb?.({ ok: false, error: "Lobby not found" });
+    cb?.({ ok: true, players: publicPlayers(lobby) });
+  });
+
   socket.on("join_lobby", ({ code, name }, cb) => {
     const lobby = lobbies.get(code);
     if (!lobby) return cb?.({ ok: false, error: "Lobby not found" });
     if (lobby.phase !== "LOBBY") return cb?.({ ok: false, error: "Game already started" });
+    const trimmedName = name?.trim() || "Player";
+    if (lobby.players.some((p) => p.name.toLowerCase() === trimmedName.toLowerCase())) {
+      return cb?.({ ok: false, error: "Name already taken in this lobby" });
+    }
     const id = Math.random().toString(36).slice(2, 10);
-    const player: Player = { id, socketId: socket.id, name: name?.trim() || "Player", score: 0, connected: true };
+    const player: Player = { id, socketId: socket.id, name: trimmedName, score: 0, connected: true };
     lobby.players.push(player);
     socket.join(code);
     cb?.({ ok: true, playerId: id });
@@ -228,9 +307,11 @@ io.on("connection", (socket: Socket) => {
       revealedChars: 0,
       attemptedPlayerIds: [],
       buzzedPlayerId: null,
+      resultType: null,
+      winnerId: null,
     };
     cb?.({ ok: true });
-    startReveal(lobby);
+    startCountdown(lobby);
     broadcast(lobby);
   });
 
@@ -292,6 +373,24 @@ io.on("connection", (socket: Socket) => {
     rotatePicker(lobby);
     cb?.({ ok: true });
     broadcast(lobby);
+  });
+
+  socket.on("leave_game", ({ code, playerId }, cb) => {
+    const lobby = lobbies.get(code);
+    if (!lobby) return cb?.({ ok: false, error: "Lobby not found" });
+    removePlayer(lobby, playerId);
+    socket.leave(code);
+    cb?.({ ok: true });
+    broadcast(lobby);
+  });
+
+  socket.on("end_game", ({ code, token }, cb) => {
+    const lobby = lobbies.get(code);
+    if (!checkAuth(lobby, token)) return cb?.({ ok: false, error: "Not authorized" });
+    clearRevealTimer(lobby);
+    io.to(code).emit("game_ended");
+    lobbies.delete(code);
+    cb?.({ ok: true });
   });
 
   socket.on("disconnect", () => {

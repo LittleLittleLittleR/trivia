@@ -1,4 +1,4 @@
-export type Phase = "LOBBY" | "BOARD" | "REVEALING" | "BUZZED" | "REVEAL_ANSWER";
+export type Phase = "LOBBY" | "BOARD" | "COUNTDOWN" | "REVEALING" | "BUZZED" | "REVEAL_ANSWER";
 
 export interface Player {
   id: string;
@@ -22,6 +22,8 @@ export interface ActiveQuestion {
   revealedChars: number;
   attemptedPlayerIds: string[]; // players who buzzed + were wrong on this question
   buzzedPlayerId: string | null; // player currently locked in to answer
+  resultType: "correct" | "failed" | null; // set once a question is resolved, until Continue is clicked
+  winnerId: string | null;
 }
 
 export interface Lobby {
@@ -34,6 +36,8 @@ export interface Lobby {
   currentPickerId: string | null;
   currentQuestion: ActiveQuestion | null;
   revealTimer: ReturnType<typeof setInterval> | null;
+  countdownValue: number | null;
+  countdownTimer: ReturnType<typeof setInterval> | null;
   createdAt: number;
 }
 
@@ -54,15 +58,18 @@ export interface HostView {
   categories: string[];
   cells: Cell[];
   currentPickerId: string | null;
+  countdownValue: number | null;
   currentQuestion: {
     category: string;
     points: number;
     text: string;
-    answer: string;
+    answer: string | null; // only populated once resultType is set - hidden while a guess is being judged
     revealedText: string;
     fullyRevealed: boolean;
     buzzedPlayerId: string | null;
     attemptedPlayerIds: string[];
+    resultType: "correct" | "failed" | null;
+    winnerId: string | null;
   } | null;
 }
 
@@ -76,5 +83,6 @@ export interface PlayerView {
   currentPickerId: string | null;
   currentPoints: number | null;
   currentCategory: string | null;
+  countdownValue: number | null;
   buzzerState: "disabled" | "ready" | "locked_you" | "locked_other";
 }
