@@ -31,7 +31,7 @@ export const POINT_VALUES = [100, 200, 300, 400, 500] as const;
 // Keep the shape identical - 5 categories, 5 point values each.
 export const CATEGORIES: CategoryData[] = [
   {
-    name: "CATEGORY 1",
+    name: "Miracles and Wonders",
     questions: {
       100: { text: "During the wedding feast at Cana, what drink was miraculously produced inside six stone water jars?", answer: "Wine" },
       200: { text: "What animal spoke to the prophet Balaam after he struck it?", answer: "Donkey" },
